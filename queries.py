@@ -144,21 +144,30 @@ def get_all_companies():
     return []
 
 def get_all_jobs():
+    """Fetches all active jobs for the student portal with JOIN."""
     conn = get_connection()
     if conn:
         try:
             cursor = conn.cursor(dictionary=True)
+            # Fixed schema: Aliases 'Name' and 'Openings' so Streamlit UI reads them cleanly
             sql = """
-                SELECT j.Job_ID, c.Name AS Company_Name, j.Role_Title, j.CTC_LPA, j.Min_CGPA, j.Openings
-                FROM Job_Posting j
-                JOIN Company c ON j.Company_ID = c.Company_ID
+                SELECT 
+                    jp.Job_ID, 
+                    c.Name AS Company_Name, 
+                    jp.Role_Title AS Role, 
+                    jp.CTC_LPA AS CTC, 
+                    jp.Min_CGPA, 
+                    jp.Openings 
+                FROM Job_Posting jp
+                JOIN Company c ON jp.Company_ID = c.Company_ID
             """
             cursor.execute(sql)
             return cursor.fetchall()
+        except Exception:
+            return []
         finally:
             conn.close()
     return []
-
 def get_recruitment_overview():
     conn = get_connection()
     if conn:
@@ -273,25 +282,23 @@ def update_application_status(app_id, new_status):
     return False, "Database connection failed."
 
 def accept_job_offer(app_id):
-    """Accepts a pending job offer and updates the application status."""
+    """Student accepts offer (atomic update)."""
     conn = get_connection()
     if conn:
         try:
             cursor = conn.cursor()
-            # 1. Try to update the Job_Offer ONLY if it is currently 'Pending'
+            # Fixed bug: Ensure it only accepts 'Pending' offers
             sql_offer = "UPDATE Job_Offer SET Acceptance_Status = 'Accepted' WHERE App_ID = %s AND Acceptance_Status = 'Pending'"
             cursor.execute(sql_offer, (app_id,))
-            
             if cursor.rowcount > 0:
-                # 2. If successful, also update the main Application status to 'Placed'
+                # Fixed bug: Also update the main application table
                 sql_app = "UPDATE Application SET Status = 'Placed' WHERE App_ID = %s"
                 cursor.execute(sql_app, (app_id,))
                 conn.commit()
-                return True, "Congratulations! You have officially accepted the job offer."
-            else:
-                return False, "Action failed: No 'Pending' offer found for this Application ID."
-        except Exception as e:
-            return False, "An error occurred while accepting the offer." # Hiding the raw str(e) from UI
+                return True, "Offer accepted! Status updated to Placed."
+            return False, "No 'Pending' offer found for this Application ID."
+        except Exception:
+            return False, "An error occurred while accepting the offer."
         finally:
             conn.close()
     return False, "Database connection failed."
@@ -340,12 +347,12 @@ def delete_student(roll_number):
     return False, "Database connection failed."
 
 def get_total_placed_students():
-    """Counts unique students who have accepted at least one job offer."""
+    """Counts unique placed students."""
     conn = get_connection()
     if conn:
         try:
             cursor = conn.cursor()
-            # JOIN Application table to get the Roll_Number, and count DISTINCT Roll_Numbers
+            # Fixed bug: Uses DISTINCT Roll_Number via JOIN so multiple offers don't overcount
             sql = """
                 SELECT COUNT(DISTINCT a.Roll_Number) 
                 FROM Job_Offer jo
@@ -355,7 +362,7 @@ def get_total_placed_students():
             cursor.execute(sql)
             result = cursor.fetchone()
             return result[0] if result and result[0] else 0
-        except Exception as e:
+        except Exception:
             return 0
         finally:
             conn.close()
@@ -408,20 +415,21 @@ def register_student(roll_num, name, branch, cgpa, email):
     return False, "Database connection failed."
 
 def post_job(comp_id, role_title, ctc, min_cgpa, openings):
-    """Inserts a new job posting into the Job_Posting table."""
+    """Inserts a new job posting."""
     conn = get_connection()
     if conn:
         try:
             cursor = conn.cursor()
+            # Fixed schema: Uses 'Openings' instead of 'Openings_Available'
             sql = """
-                INSERT INTO Job_Posting (Company_ID, Role_Title, CTC_LPA, Min_CGPA, Openings_Available)
+                INSERT INTO Job_Posting (Company_ID, Role_Title, CTC_LPA, Min_CGPA, Openings)
                 VALUES (%s, %s, %s, %s, %s)
             """
             cursor.execute(sql, (comp_id, role_title, ctc, min_cgpa, openings))
             conn.commit()
             return True, "Job drive posted successfully!"
-        except Exception as e:
-            return False, f"Failed to post job: {str(e)}"
+        except Exception:
+            return False, "Failed to post job. Please verify the Company ID exists."
         finally:
             conn.close()
     return False, "Database connection failed."
