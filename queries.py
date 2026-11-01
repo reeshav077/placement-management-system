@@ -288,6 +288,29 @@ def accept_job_offer(app_id):
         finally:
             conn.close()
     return False, "Database connection failed."
+
+def update_student_profile(roll_number, new_name, new_branch, new_cgpa, new_email):
+    """Updates a student's profile details based on their Roll Number."""
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            sql = """
+                UPDATE Student 
+                SET Name = %s, Branch = %s, CGPA = %s, Email = %s 
+                WHERE Roll_Number = %s
+            """
+            cursor.execute(sql, (new_name, new_branch, new_cgpa, new_email, roll_number))
+            conn.commit()
+            
+            if cursor.rowcount > 0:
+                return True, "Profile updated successfully!"
+            return False, "Roll Number not found. Please check and try again."
+        except Exception as e:
+            return False, f"Error updating profile: {str(e)}"
+        finally:
+            conn.close()
+    return False, "Database connection failed."
 # ==========================================
 # DELETE OPERATIONS
 # ==========================================

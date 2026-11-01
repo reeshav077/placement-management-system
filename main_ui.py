@@ -43,7 +43,28 @@ with tab1:
             st.dataframe(pd.DataFrame(students), use_container_width=True)
         else:
             st.info("No student records.")
-            
+        st.divider()
+        st.write("#### ✏️ Update Profile Details")
+        with st.expander("Click here to update your Name, Branch, CGPA, or Email"):
+            with st.form("update_profile_form"):
+                st.info("Enter your existing Roll Number to verify your identity, then provide your updated details.")
+                upd_roll = st.text_input("Your Roll Number (e.g., 2025UCS1669)")
+                upd_name = st.text_input("Updated Name")
+                upd_branch = st.selectbox("Updated Branch", ["CSE", "IT", "ECE", "MAC", "EE", "ME"])
+                upd_cgpa = st.number_input("Updated CGPA", min_value=0.0, max_value=10.0, step=0.1)
+                upd_email = st.text_input("Updated Email")
+                
+                if st.form_submit_button("Save Changes"):
+                    if upd_roll and upd_name and upd_email:
+                        success, msg = queries.update_student_profile(
+                            upd_roll, upd_name, upd_branch, upd_cgpa, upd_email
+                        )
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+                    else:
+                        st.warning("Please fill in the Roll Number, Name, and Email fields.")        
     with col2:
         st.write("#### 💼 Company Job Postings")
         jobs = queries.get_all_jobs()
