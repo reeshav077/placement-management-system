@@ -1,475 +1,261 @@
-import mysql.connector
-import certifi
-from streamlit import cursor
+"""Database operations for the placement management app.
+
+Requires db_connection.py to expose get_connection(), returning a
+mysql-connector compatible connection (or None on failure).
+"""
+
+from contextlib import closing
 
 from db_connection import get_connection
 
-# ==========================================
-# CREATE OPERATIONS
-# ==========================================
+
+def _run(sql, params=(), *, fetch=None, dictionary=False):
+    """Run one statement and always close its cursor/connection.
+
+    fetch: 'all', 'one', or None. Writes are committed only on success.
+    """
+    conn = get_connection()
+    if conn is None:
+        return None
+    try:
+        with closing(conn.cursor(dictionary=dictionary)) as cur:
+            cur.execute(sql, params)
+            if fetch == "all":
+                return cur.fetchall()
+            if fetch == "one":
+                return cur.fetchone()
+            conn.commit()
+            return cur.rowcount
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+
+
+def _write(sql, params, success_message, *, missing_message=None):
+    try:
+        count = _run(sql, params)
+        if count is None:
+            return False, "Database connection failed."
+        if count == 0 and missing_message:
+            return False, missing_message
+        return True, success_message
+    except Exception as exc:
+        return False, str(exc)
+
 
 def add_student(roll_number, name, branch, cgpa, email):
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            sql = "INSERT INTO Student (Roll_Number, Name, Branch, CGPA, Email) VALUES (%s, %s, %s, %s, %s)"
-            cursor.execute(sql, (roll_number, name, branch, cgpa, email))
-            conn.commit()
-            return True, "Student registered successfully."
-        except Exception as e:
-            return False, str(e)
-        finally:
-            conn.close()
-    return False, "Database connection failed."
+    return register_student(roll_number, name, branch, cgpa, email)
 
-def add_company(name, industry, location):
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            sql = "INSERT INTO Company (Name, Industry, Location) VALUES (%s, %s, %s)"
-            cursor.execute(sql, (name, industry, location))
-            conn.commit()
-            return True, f"Company '{name}' registered successfully!"
-        except Exception as e:
-            return False, str(e)
-        finally:
-            conn.close()
-    return False, "Database connection failed."
-
-def add_job_posting(company_id, role_title, ctc_lpa, min_cgpa, openings):
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            sql = """
-                INSERT INTO Job_Posting (Company_ID, Role_Title, CTC_LPA, Min_CGPA, Openings) 
-                VALUES (%s, %s, %s, %s, %s)
-            """
-            cursor.execute(sql, (company_id, role_title, ctc_lpa, min_cgpa, openings))
-            conn.commit()
-            return True, f"Job '{role_title}' posted successfully!"
-        except Exception as e:
-            return False, str(e)
-        finally:
-            conn.close()
-    return False, "Database connection failed."
-
-def apply_for_job(roll_number, job_id):
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            sql = "INSERT INTO Application (Roll_Number, Job_ID, Application_Status) VALUES (%s, %s, 'Applied')"
-            cursor.execute(sql, (roll_number, job_id))
-            conn.commit()
-            return True, "Application submitted."
-        except Exception as e:
-            return False, str(e)
-        finally:
-            conn.close()
-    return False, "Database connection failed."
-
-def schedule_interview_round(app_id, round_name, score, feedback, round_status):
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            sql = """
-                INSERT INTO Interview_Round (App_ID, Round_Name, Score, Feedback, Round_Status) 
-                VALUES (%s, %s, %s, %s, %s)
-            """
-            cursor.execute(sql, (app_id, round_name, score, feedback, round_status))
-            conn.commit()
-            return True, f"{round_name} logged for Application #{app_id}."
-        except Exception as e:
-            return False, str(e)
-        finally:
-            conn.close()
-    return False, "Database connection failed."
-
-def rollout_job_offer(app_id, base_salary, joining_date):
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            verify_sql = "SELECT Application_Status FROM Application WHERE App_ID = %s"
-            cursor.execute(verify_sql, (app_id,))
-            result = cursor.fetchone()
-            
-            if result and result[0] != 'Offered':
-                offer_sql = """
-                    INSERT INTO Job_Offer (App_ID, Offer_Date, Base_Salary_LPA, Joining_Date, Acceptance_Status) 
-                    VALUES (%s, CURRENT_DATE(), %s, %s, 'Pending')
-                """
-                cursor.execute(offer_sql, (app_id, base_salary, joining_date))
-                
-                update_sql = "UPDATE Application SET Application_Status = 'Offered' WHERE App_ID = %s"
-                cursor.execute(update_sql, (app_id,))
-                
-                conn.commit()
-                return True, "Job offer rolled out successfully!"
-            return False, "Candidate is already offered or invalid application."
-        except Exception as e:
-            return False, str(e)
-        finally:
-            conn.close()
-    return False, "Database connection failed."
-
-# ==========================================
-# READ OPERATIONS
-# ==========================================
-
-def get_all_students():
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM Student")
-            return cursor.fetchall()
-        finally:
-            conn.close()
-    return []
-
-def get_all_companies():
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM Company")
-            return cursor.fetchall()
-        finally:
-            conn.close()
-    return []
-
-def get_all_jobs():
-    """Fetches all active jobs for the student portal with JOIN."""
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor(dictionary=True)
-            # Fixed schema: Aliases 'Name' and 'Openings' so Streamlit UI reads them cleanly
-            sql = """
-                SELECT 
-                    jp.Job_ID, 
-                    c.Name AS Company_Name, 
-                    jp.Role_Title AS Role, 
-                    jp.CTC_LPA AS CTC, 
-                    jp.Min_CGPA, 
-                    jp.Openings 
-                FROM Job_Posting jp
-                JOIN Company c ON jp.Company_ID = c.Company_ID
-            """
-            cursor.execute(sql)
-            return cursor.fetchall()
-        except Exception:
-            return []
-        finally:
-            conn.close()
-    return []
-def get_recruitment_overview():
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor(dictionary=True)
-            sql = """
-                SELECT 
-                    a.App_ID,
-                    s.Name AS Student_Name,
-                    s.Roll_Number,
-                    c.Name AS Company,
-                    j.Role_Title,
-                    j.CTC_LPA,
-                    a.Application_Status
-                FROM Application a
-                JOIN Student s ON a.Roll_Number = s.Roll_Number
-                JOIN Job_Posting j ON a.Job_ID = j.Job_ID
-                JOIN Company c ON j.Company_ID = c.Company_ID
-            """
-            cursor.execute(sql)
-            return cursor.fetchall()
-        finally:
-            conn.close()
-    return []
-
-def get_interview_evaluations():
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor(dictionary=True)
-            sql = """
-                SELECT 
-                    ir.Round_ID,
-                    ir.App_ID,
-                    s.Name AS Candidate_Name,
-                    c.Name AS Hiring_Company,
-                    ir.Round_Name,
-                    ir.Score,
-                    ir.Feedback,
-                    ir.Round_Status
-                FROM Interview_Round ir
-                JOIN Application a ON ir.App_ID = a.App_ID
-                JOIN Student s ON a.Roll_Number = s.Roll_Number
-                JOIN Job_Posting j ON a.Job_ID = j.Job_ID
-                JOIN Company c ON j.Company_ID = c.Company_ID
-            """
-            cursor.execute(sql)
-            return cursor.fetchall()
-        finally:
-            conn.close()
-    return []
-
-def get_eligible_jobs(roll_number):
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor(dictionary=True)
-            sql = """
-                SELECT j.Job_ID, c.Name AS Company, j.Role_Title, j.CTC_LPA, j.Min_CGPA
-                FROM Job_Posting j
-                JOIN Company c ON j.Company_ID = c.Company_ID
-                WHERE j.Min_CGPA <= (
-                    SELECT CGPA FROM Student WHERE Roll_Number = %s
-                )
-                AND j.Job_ID NOT IN (
-                    SELECT Job_ID FROM Application WHERE Roll_Number = %s
-                )
-            """
-            cursor.execute(sql, (roll_number, roll_number))
-            return cursor.fetchall()
-        finally:
-            conn.close()
-    return []
-
-def get_placement_analytics():
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor(dictionary=True)
-            sql = """
-                SELECT 
-                    (SELECT COUNT(*) FROM Student) as Total_Students,
-                    (SELECT COUNT(*) FROM Job_Offer WHERE Acceptance_Status = 'Accepted') as Total_Placed,
-                    (SELECT MAX(Base_Salary_LPA) FROM Job_Offer WHERE Acceptance_Status = 'Accepted') as Highest_Package,
-                    (SELECT AVG(Base_Salary_LPA) FROM Job_Offer WHERE Acceptance_Status = 'Accepted') as Average_Package
-            """
-            cursor.execute(sql)
-            return cursor.fetchone()
-        finally:
-            conn.close()
-    return {}
-
-# ==========================================
-# UPDATE OPERATIONS
-# ==========================================
-
-def update_application_status(app_id, new_status):
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            sql = "UPDATE Application SET Application_Status = %s WHERE App_ID = %s"
-            cursor.execute(sql, (new_status, app_id))
-            conn.commit()
-            if cursor.rowcount > 0:
-                return True, f"Application #{app_id} status updated to '{new_status}'."
-            return False, f"Application ID #{app_id} not found."
-        except Exception as e:
-            return False, str(e)
-        finally:
-            conn.close()
-    return False, "Database connection failed."
-
-def accept_job_offer(app_id):
-    """Student accepts offer (atomic update)."""
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            # Fixed bug: Ensure it only accepts 'Pending' offers
-            sql_offer = "UPDATE Job_Offer SET Acceptance_Status = 'Accepted' WHERE App_ID = %s AND Acceptance_Status = 'Pending'"
-            cursor.execute(sql_offer, (app_id,))
-            if cursor.rowcount > 0:
-                # Fixed bug: Also update the main application table
-                sql_app = "UPDATE Application SET Status = 'Placed' WHERE App_ID = %s"
-                cursor.execute(sql_app, (app_id,))
-                conn.commit()
-                return True, "Offer accepted! Status updated to Placed."
-            return False, "No 'Pending' offer found for this Application ID."
-        except Exception:
-            return False, "An error occurred while accepting the offer."
-        finally:
-            conn.close()
-    return False, "Database connection failed."
-
-def update_student_profile(roll_number, new_name, new_branch, new_cgpa, new_email):
-    """Updates a student's profile details based on their Roll Number."""
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            sql = """
-                UPDATE Student 
-                SET Name = %s, Branch = %s, CGPA = %s, Email = %s 
-                WHERE Roll_Number = %s
-            """
-            cursor.execute(sql, (new_name, new_branch, new_cgpa, new_email, roll_number))
-            conn.commit()
-            
-            if cursor.rowcount > 0:
-                return True, "Profile updated successfully!"
-            return False, "Roll Number not found. Please check and try again."
-        except Exception as e:
-            return False, f"Error updating profile: {str(e)}"
-        finally:
-            conn.close()
-    return False, "Database connection failed."
-# ==========================================
-# DELETE OPERATIONS
-# ==========================================
-
-def delete_student(roll_number):
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            sql = "DELETE FROM Student WHERE Roll_Number = %s"
-            cursor.execute(sql, (roll_number,))
-            conn.commit()
-            if cursor.rowcount > 0:
-                return True, f"Student {roll_number} deleted successfully."
-            return False, f"Student with Roll Number {roll_number} not found."
-        except Exception as e:
-            return False, str(e)
-        finally:
-            conn.close()
-    return False, "Database connection failed."
-
-def get_total_placed_students():
-    """Counts unique placed students."""
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            # Fixed bug: Uses DISTINCT Roll_Number via JOIN so multiple offers don't overcount
-            sql = """
-                SELECT COUNT(DISTINCT a.Roll_Number) 
-                FROM Job_Offer jo
-                JOIN Application a ON jo.App_ID = a.App_ID
-                WHERE jo.Acceptance_Status = 'Accepted'
-            """
-            cursor.execute(sql)
-            result = cursor.fetchone()
-            return result[0] if result and result[0] else 0
-        except Exception:
-            return 0
-        finally:
-            conn.close()
-    return 0
-
-def get_highest_package():
-    """Finds the maximum CTC among accepted offers."""
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT MAX(Base_Salary_LPA) FROM Job_Offer WHERE Acceptance_Status = 'Accepted'")
-            result = cursor.fetchone()
-            return float(result[0]) if result and result[0] else 0.0
-        except Exception as e:
-            return 0.0
-        finally:
-            conn.close()
-    return 0.0
-
-def get_total_companies():
-    """Counts the total number of registered recruiting companies."""
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM Company")
-            result = cursor.fetchone()
-            return result[0] if result and result[0] else 0
-        except Exception as e:
-            return 0
-        finally:
-            conn.close()
-    return 0
 
 def register_student(roll_num, name, branch, cgpa, email):
-    """Registers a new student in the database."""
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            sql = "INSERT INTO Student (Roll_Number, Name, Branch, CGPA, Email) VALUES (%s, %s, %s, %s, %s)"
-            cursor.execute(sql, (roll_num, name, branch, cgpa, email))
-            conn.commit()
-            return True, "Student registered successfully!"
-        except Exception as e:
-            return False, f"Registration failed: {str(e)}"
-        finally:
-            conn.close()
-    return False, "Database connection failed."
+    return _write(
+        "INSERT INTO Student (Roll_Number, Name, Branch, CGPA, Email) VALUES (%s,%s,%s,%s,%s)",
+        (roll_num, name, branch, cgpa, email), "Student registered successfully!",
+    )
+
+
+def add_company(name, industry=None, location=None, comp_id=None):
+    """Register a company; ID is generated by the DB unless explicitly supplied."""
+    if comp_id is None:
+        return _write(
+            "INSERT INTO Company (Name, Industry, Location) VALUES (%s,%s,%s)",
+            (name, industry, location), f"Company '{name}' registered successfully!",
+        )
+    return _write(
+        "INSERT INTO Company (Company_ID, Name) VALUES (%s,%s)",
+        (comp_id, name), f"{name} has been added successfully!",
+    )
+
 
 def post_job(comp_id, role_title, ctc, min_cgpa, openings):
-    """Inserts a new job posting."""
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            # Fixed schema: Uses 'Openings' instead of 'Openings_Available'
-            sql = """
-                INSERT INTO Job_Posting (Company_ID, Role_Title, CTC_LPA, Min_CGPA, Openings)
-                VALUES (%s, %s, %s, %s, %s)
-            """
-            cursor.execute(sql, (comp_id, role_title, ctc, min_cgpa, openings))
-            conn.commit()
-            return True, "Job drive posted successfully!"
-        except Exception:
-            return False, "Failed to post job. Please verify the Company ID exists."
-        finally:
-            conn.close()
-    return False, "Database connection failed."
+    return add_job_posting(comp_id, role_title, ctc, min_cgpa, openings)
 
-def add_company(comp_id, comp_name):
-    """Registers a new company into the database."""
-    conn = get_connection()
-    if conn:
+
+def add_job_posting(company_id, role_title, ctc_lpa, min_cgpa, openings):
+    return _write(
+        "INSERT INTO Job_Posting (Company_ID, Role_Title, CTC_LPA, Min_CGPA, Openings) VALUES (%s,%s,%s,%s,%s)",
+        (company_id, role_title, ctc_lpa, min_cgpa, openings),
+        f"Job '{role_title}' posted successfully!",
+    )
+
+
+def apply_for_job(roll_number, job_id):
+    """Insert an application only when the student meets the job CGPA cutoff."""
+    try:
+        n = _run(
+            "INSERT INTO Application (Roll_Number, Job_ID, Application_Status) "
+            "SELECT s.Roll_Number, j.Job_ID, 'Applied' FROM Student s JOIN Job_Posting j "
+            "ON j.Job_ID=%s WHERE s.Roll_Number=%s AND s.CGPA >= j.Min_CGPA "
+            "AND NOT EXISTS (SELECT 1 FROM Application a WHERE a.Roll_Number=s.Roll_Number AND a.Job_ID=j.Job_ID)",
+            (job_id, roll_number),
+        )
+        if n is None:
+            return False, "Database connection failed."
+        return (True, "Application submitted.") if n else (False, "Student/job not found, CGPA requirement not met, or application already exists.")
+    except Exception as exc:
+        return False, str(exc)
+
+
+def schedule_interview_round(app_id, round_name, score=None, feedback=None, round_status="Scheduled"):
+    return _write(
+        "INSERT INTO Interview_Round (App_ID, Round_Name, Score, Feedback, Round_Status) VALUES (%s,%s,%s,%s,%s)",
+        (app_id, round_name, score, feedback, round_status),
+        f"{round_name} recorded for Application #{app_id}.",
+    )
+
+
+def rollout_job_offer(app_id, base_salary, joining_date):
+    """Create a pending offer once for an existing application."""
+    try:
+        conn = get_connection()
+        if conn is None:
+            return False, "Database connection failed."
         try:
-            cursor = conn.cursor()
-            # Note: Ensure column names match your TiDB schema (e.g., Company_ID, Name)
-            cursor.execute("INSERT INTO Company (Company_ID, Name) VALUES (%s, %s)", (comp_id, comp_name))
-            conn.commit()
-            return True, f"{comp_name} has been officially approved and added to the database!"
-        except Exception as e:
-            return False, f"Error adding company: {str(e)}"
+            with closing(conn.cursor()) as cur:
+                cur.execute("SELECT App_ID FROM Application WHERE App_ID=%s", (app_id,))
+                if not cur.fetchone():
+                    return False, "Application not found."
+                cur.execute("SELECT App_ID FROM Job_Offer WHERE App_ID=%s", (app_id,))
+                if cur.fetchone():
+                    return False, "An offer already exists for this application."
+                cur.execute(
+                    "INSERT INTO Job_Offer (App_ID, Offer_Date, Base_Salary_LPA, Joining_Date, Acceptance_Status) "
+                    "VALUES (%s, CURRENT_DATE(), %s, %s, 'Pending')", (app_id, base_salary, joining_date),
+                )
+                cur.execute("UPDATE Application SET Application_Status='Offered' WHERE App_ID=%s", (app_id,))
+                conn.commit()
+                return True, "Job offer rolled out successfully!"
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
-    return False, "Database connection failed."
+    except Exception as exc:
+        return False, str(exc)
+
+
+def get_all_students():
+    return _safe_all("SELECT * FROM Student")
+
+
+def get_all_companies():
+    return _safe_all("SELECT * FROM Company")
+
+
+def get_all_jobs():
+    return _safe_all("SELECT jp.Job_ID, c.Name AS Company_Name, jp.Role_Title AS Role, jp.CTC_LPA AS CTC, jp.Min_CGPA, jp.Openings FROM Job_Posting jp JOIN Company c ON jp.Company_ID=c.Company_ID")
+
+
+def get_recruitment_overview():
+    return _safe_all("SELECT a.App_ID, s.Name AS Student_Name, s.Roll_Number, c.Name AS Company, j.Role_Title, j.CTC_LPA, a.Application_Status FROM Application a JOIN Student s ON a.Roll_Number=s.Roll_Number JOIN Job_Posting j ON a.Job_ID=j.Job_ID JOIN Company c ON j.Company_ID=c.Company_ID")
+
+
+def get_interview_evaluations():
+    return _safe_all("SELECT ir.Round_ID, ir.App_ID, s.Name AS Candidate_Name, c.Name AS Hiring_Company, ir.Round_Name, ir.Score, ir.Feedback, ir.Round_Status FROM Interview_Round ir JOIN Application a ON ir.App_ID=a.App_ID JOIN Student s ON a.Roll_Number=s.Roll_Number JOIN Job_Posting j ON a.Job_ID=j.Job_ID JOIN Company c ON j.Company_ID=c.Company_ID")
+
+
+def get_eligible_jobs(roll_number):
+    return _safe_all("SELECT j.Job_ID, c.Name AS Company, j.Role_Title, j.CTC_LPA, j.Min_CGPA FROM Job_Posting j JOIN Company c ON j.Company_ID=c.Company_ID JOIN Student s ON s.Roll_Number=%s AND s.CGPA>=j.Min_CGPA WHERE NOT EXISTS (SELECT 1 FROM Application a WHERE a.Roll_Number=s.Roll_Number AND a.Job_ID=j.Job_ID)", (roll_number,))
+
+
+def get_placement_analytics():
+    try:
+        return _run("SELECT (SELECT COUNT(*) FROM Student) AS Total_Students, (SELECT COUNT(*) FROM Job_Offer WHERE Acceptance_Status='Accepted') AS Total_Placed, (SELECT MAX(Base_Salary_LPA) FROM Job_Offer WHERE Acceptance_Status='Accepted') AS Highest_Package, (SELECT AVG(Base_Salary_LPA) FROM Job_Offer WHERE Acceptance_Status='Accepted') AS Average_Package", fetch="one", dictionary=True) or {}
+    except Exception:
+        return {}
+
+
+def update_application_status(app_id, new_status):
+    return _write("UPDATE Application SET Application_Status=%s WHERE App_ID=%s", (new_status, app_id), f"Application #{app_id} status updated to '{new_status}'.", missing_message=f"Application ID #{app_id} not found.")
+
+
+def accept_job_offer(app_id):
+    try:
+        conn = get_connection()
+        if conn is None:
+            return False, "Database connection failed."
+        try:
+            with closing(conn.cursor()) as cur:
+                cur.execute("UPDATE Job_Offer SET Acceptance_Status='Accepted' WHERE App_ID=%s AND Acceptance_Status='Pending'", (app_id,))
+                if not cur.rowcount:
+                    return False, "No pending offer found for this Application ID."
+                cur.execute("UPDATE Application SET Application_Status='Placed' WHERE App_ID=%s", (app_id,))
+                conn.commit()
+                return True, "Offer accepted! Status updated to Placed."
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    except Exception as exc:
+        return False, str(exc)
+
+
+def reject_job_offer(app_id):
+    try:
+        conn = get_connection()
+        if conn is None:
+            return False, "Database connection failed."
+        try:
+            with closing(conn.cursor()) as cur:
+                cur.execute("UPDATE Job_Offer SET Acceptance_Status='Rejected' WHERE App_ID=%s AND Acceptance_Status='Pending'", (app_id,))
+                if not cur.rowcount:
+                    return False, "No pending offer found for this Application ID."
+                cur.execute("UPDATE Application SET Application_Status='Rejected' WHERE App_ID=%s", (app_id,))
+                conn.commit()
+                return True, "Offer rejected."
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    except Exception as exc:
+        return False, str(exc)
+
+
+def update_student_profile(roll_number, new_name, new_branch, new_cgpa, new_email):
+    return _write("UPDATE Student SET Name=%s, Branch=%s, CGPA=%s, Email=%s WHERE Roll_Number=%s", (new_name, new_branch, new_cgpa, new_email, roll_number), "Profile updated successfully!", missing_message="Roll Number not found.")
+
+
+def delete_student(roll_number):
+    return _write("DELETE FROM Student WHERE Roll_Number=%s", (roll_number,), f"Student {roll_number} deleted successfully.", missing_message=f"Student with Roll Number {roll_number} not found.")
+
+
+def _safe_all(sql, params=()):
+    try:
+        return _run(sql, params, fetch="all", dictionary=True) or []
+    except Exception:
+        return []
+
 
 def get_student_applications(roll_num):
-    """Fetches a student's real application statuses using JOINs."""
-    conn = get_connection()
-    if conn:
-        try:
-            cursor = conn.cursor(dictionary=True)
-            sql = """
-                SELECT 
-                    a.Job_ID, 
-                    c.Name AS Company, 
-                    a.Status 
-                FROM Application a
-                JOIN Job_Posting jp ON a.Job_ID = jp.Job_ID
-                JOIN Company c ON jp.Company_ID = c.Company_ID
-                WHERE a.Roll_Number = %s
-            """
-            cursor.execute(sql, (roll_num,))
-            return cursor.fetchall()
-        except Exception as e:
-            return []
-        finally:
-            conn.close()
-    return []
+    return _safe_all("SELECT a.App_ID, a.Job_ID, c.Name AS Company, a.Application_Status FROM Application a JOIN Job_Posting jp ON a.Job_ID=jp.Job_ID JOIN Company c ON jp.Company_ID=c.Company_ID WHERE a.Roll_Number=%s", (roll_num,))
+
+
+def get_total_placed_students():
+    try:
+        row = _run("SELECT COUNT(DISTINCT a.Roll_Number) AS n FROM Job_Offer jo JOIN Application a ON jo.App_ID=a.App_ID WHERE jo.Acceptance_Status='Accepted'", fetch="one")
+        return int(row[0] or 0) if row else 0
+    except Exception:
+        return 0
+
+
+def get_highest_package():
+    try:
+        row = _run("SELECT MAX(Base_Salary_LPA) FROM Job_Offer WHERE Acceptance_Status='Accepted'", fetch="one")
+        return float(row[0] or 0) if row else 0.0
+    except Exception:
+        return 0.0
+
+
+def get_total_companies():
+    try:
+        row = _run("SELECT COUNT(*) FROM Company", fetch="one")
+        return int(row[0] or 0) if row else 0
+    except Exception:
+        return 0
