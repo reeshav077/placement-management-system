@@ -88,16 +88,16 @@ if user_role == "🎓 Student":
         col1, col2 = st.columns(2)
         with col1:
             st.write("#### 📊 Application Status Tracker & Interviews")
-            track_roll = st.text_input("Enter Roll Number to view schedule:")
-            if st.button("Check Status"):
-                # Simulated dataframe for UI presentation
-                mock_data = pd.DataFrame({
-                    "Job ID": ["J101", "J102"],
-                    "Company": ["Google", "Microsoft"],
-                    "Status": ["Shortlisted", "Interviewing"],
-                    "Next Round": ["Tech Round 1 (Nov 4)", "HR Round (Nov 5)"]
-                })
-                st.dataframe(mock_data, use_container_width=True)
+            roll_to_check = st.text_input("Enter Roll Number to view schedule:")
+        if st.button("Check Status"):
+            if roll_to_check:
+                student_apps = queries.get_student_applications(roll_to_check)
+                if student_apps:
+                    st.dataframe(student_apps, use_container_width=True)
+                else:
+                    st.info("No applications found for this Roll Number.")
+            else:
+                st.warning("Please enter a Roll Number.")
                 
         with col2:
             st.write("#### 📩 Offer Actions (Accept / Reject)")

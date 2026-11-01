@@ -449,3 +449,27 @@ def add_company(comp_id, comp_name):
         finally:
             conn.close()
     return False, "Database connection failed."
+
+def get_student_applications(roll_num):
+    """Fetches a student's real application statuses using JOINs."""
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor(dictionary=True)
+            sql = """
+                SELECT 
+                    a.Job_ID, 
+                    c.Name AS Company, 
+                    a.Status 
+                FROM Application a
+                JOIN Job_Posting jp ON a.Job_ID = jp.Job_ID
+                JOIN Company c ON jp.Company_ID = c.Company_ID
+                WHERE a.Roll_Number = %s
+            """
+            cursor.execute(sql, (roll_num,))
+            return cursor.fetchall()
+        except Exception as e:
+            return []
+        finally:
+            conn.close()
+    return []
