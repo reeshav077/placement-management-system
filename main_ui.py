@@ -8,8 +8,12 @@ except ModuleNotFoundError as exc:
     ) from exc
 
 from datetime import date
+import importlib
 import pandas as pd
 import queries
+
+# Ensure helper modules are always fresh on Streamlit hot-reloads
+importlib.reload(queries)
 
 # ==========================================
 # PAGE CONFIGURATION & STYLING
