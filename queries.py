@@ -1,5 +1,6 @@
 import mysql.connector
 import certifi
+from streamlit import cursor
 
 from db_connection import get_connection
 
@@ -431,8 +432,8 @@ def add_company(comp_id, comp_name):
     if conn:
         try:
             cursor = conn.cursor()
-            # Note: Ensure column names match your TiDB schema (e.g., Company_ID, Company_Name)
-            cursor.execute("INSERT INTO Company (Company_ID, Company_Name) VALUES (%s, %s)", (comp_id, comp_name))
+            # Note: Ensure column names match your TiDB schema (e.g., Company_ID, Name)
+            cursor.execute("INSERT INTO Company (Company_ID, Name) VALUES (%s, %s)", (comp_id, comp_name))
             conn.commit()
             return True, f"{comp_name} has been officially approved and added to the database!"
         except Exception as e:
