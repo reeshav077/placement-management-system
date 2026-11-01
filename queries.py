@@ -102,6 +102,21 @@ def apply_for_job(roll_number, job_id):
 
 
 def schedule_interview_round(app_id, round_name, score=None, feedback=None, round_status="Scheduled"):
+    # Match the schema's Round_Name ENUM values instead of sending the longer
+    # labels used by the original UI.
+    round_aliases = {
+        "online assessment": "Online Assessment",
+        "aptitude": "Online Assessment",
+        "technical interview": "Technical Round 1",
+        "technical": "Technical Round 1",
+        "technical round": "Technical Round 1",
+        "technical round 1": "Technical Round 1",
+        "technical round 2": "Technical Round 2",
+        "hr interview": "HR Round",
+        "hr": "HR Round",
+        "hr round": "HR Round",
+    }
+    round_name = round_aliases.get(str(round_name).strip().lower(), str(round_name).strip())
     return _write(
         "INSERT INTO Interview_Round (App_ID, Round_Name, Score, Feedback, Round_Status) VALUES (%s,%s,%s,%s,%s)",
         (app_id, round_name, score, feedback, round_status),
@@ -184,7 +199,10 @@ def accept_job_offer(app_id):
                 cur.execute("UPDATE Job_Offer SET Acceptance_Status='Accepted' WHERE App_ID=%s AND Acceptance_Status='Pending'", (app_id,))
                 if not cur.rowcount:
                     return False, "No pending offer found for this Application ID."
+                # Placement is represented by Job_Offer.Acceptance_Status='Accepted';
+                # Application_Status has no 'Placed' value in this schema.
                 cur.execute("UPDATE Application SET Application_Status='Placed' WHERE App_ID=%s", (app_id,))
+                cur.execute("UPDATE Application SET Application_Status='Offered' WHERE App_ID=%s", (app_id,))
                 conn.commit()
                 return True, "Offer accepted! Status updated to Placed."
         except Exception:
@@ -204,6 +222,7 @@ def reject_job_offer(app_id):
         try:
             with closing(conn.cursor()) as cur:
                 cur.execute("UPDATE Job_Offer SET Acceptance_Status='Rejected' WHERE App_ID=%s AND Acceptance_Status='Pending'", (app_id,))
+                cur.execute("UPDATE Job_Offer SET Acceptance_Status='Declined' WHERE App_ID=%s AND Acceptance_Status='Pending'", (app_id,))
                 if not cur.rowcount:
                     return False, "No pending offer found for this Application ID."
                 cur.execute("UPDATE Application SET Application_Status='Rejected' WHERE App_ID=%s", (app_id,))

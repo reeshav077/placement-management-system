@@ -120,7 +120,7 @@ elif user_role == "🏢 Company / Recruiter":
             with st.form("shortlist_form"):
                 shortlist_id = st.number_input("Application ID to shortlist", min_value=1, step=1)
                 if st.form_submit_button("Shortlist"):
-                    ok, msg = queries.update_application_status(int(shortlist_id), "Interviewing")
+                    ok, msg = queries.update_application_status(int(shortlist_id), "In Process")
                     (st.success if ok else st.error)(msg)
     with tab2:
         left, right = st.columns(2)
@@ -128,8 +128,8 @@ elif user_role == "🏢 Company / Recruiter":
             st.subheader("Record Interview Round")
             with st.form("schedule_round_form"):
                 round_app_id = st.number_input("Application ID", min_value=1, step=1, key="round_app_id")
-                round_type = st.selectbox("Round", ["Online Assessment", "Technical Interview", "HR Interview"])
-                round_status = st.selectbox("Status", ["Scheduled", "Passed", "Failed"])
+                round_type = st.selectbox("Round", ["Online Assessment", "Technical Round 1", "Technical Round 2", "HR Round"])
+                round_status = st.selectbox("Status", ["Scheduled", "Cleared", "Failed"])
                 score = st.number_input("Score (optional; use 0 if not scored)", min_value=0.0, step=0.5)
                 feedback = st.text_area("Feedback")
                 if st.form_submit_button("Save Round"):
