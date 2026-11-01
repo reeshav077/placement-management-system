@@ -272,19 +272,25 @@ def update_application_status(app_id, new_status):
     return False, "Database connection failed."
 
 def accept_job_offer(app_id):
-    """Allows a student to accept a pending job offer."""
+    """Accepts a pending job offer and updates the application status."""
     conn = get_connection()
     if conn:
         try:
             cursor = conn.cursor()
-            sql = "UPDATE Job_Offer SET Acceptance_Status = 'Accepted' WHERE App_ID = %s"
-            cursor.execute(sql, (app_id,))
-            conn.commit()
+            # 1. Try to update the Job_Offer ONLY if it is currently 'Pending'
+            sql_offer = "UPDATE Job_Offer SET Acceptance_Status = 'Accepted' WHERE App_ID = %s AND Acceptance_Status = 'Pending'"
+            cursor.execute(sql_offer, (app_id,))
+            
             if cursor.rowcount > 0:
-                return True, "Congratulations! You have accepted the job offer."
-            return False, "No pending offer found for this Application ID."
+                # 2. If successful, also update the main Application status to 'Placed'
+                sql_app = "UPDATE Application SET Status = 'Placed' WHERE App_ID = %s"
+                cursor.execute(sql_app, (app_id,))
+                conn.commit()
+                return True, "Congratulations! You have officially accepted the job offer."
+            else:
+                return False, "Action failed: No 'Pending' offer found for this Application ID."
         except Exception as e:
-            return False, str(e)
+            return False, "An error occurred while accepting the offer." # Hiding the raw str(e) from UI
         finally:
             conn.close()
     return False, "Database connection failed."
@@ -333,12 +339,19 @@ def delete_student(roll_number):
     return False, "Database connection failed."
 
 def get_total_placed_students():
-    """Counts how many students have accepted a job offer."""
+    """Counts unique students who have accepted at least one job offer."""
     conn = get_connection()
     if conn:
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(DISTINCT App_ID) FROM Job_Offer WHERE Acceptance_Status = 'Accepted'")
+            # JOIN Application table to get the Roll_Number, and count DISTINCT Roll_Numbers
+            sql = """
+                SELECT COUNT(DISTINCT a.Roll_Number) 
+                FROM Job_Offer jo
+                JOIN Application a ON jo.App_ID = a.App_ID
+                WHERE jo.Acceptance_Status = 'Accepted'
+            """
+            cursor.execute(sql)
             result = cursor.fetchone()
             return result[0] if result and result[0] else 0
         except Exception as e:
@@ -376,3 +389,38 @@ def get_total_companies():
         finally:
             conn.close()
     return 0
+
+def register_student(roll_num, name, branch, cgpa, email):
+    """Registers a new student in the database."""
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            sql = "INSERT INTO Student (Roll_Number, Name, Branch, CGPA, Email) VALUES (%s, %s, %s, %s, %s)"
+            cursor.execute(sql, (roll_num, name, branch, cgpa, email))
+            conn.commit()
+            return True, "Student registered successfully!"
+        except Exception as e:
+            return False, f"Registration failed: {str(e)}"
+        finally:
+            conn.close()
+    return False, "Database connection failed."
+
+def post_job(comp_id, role_title, ctc, min_cgpa, openings):
+    """Inserts a new job posting into the Job_Posting table."""
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            sql = """
+                INSERT INTO Job_Posting (Company_ID, Role_Title, CTC_LPA, Min_CGPA, Openings_Available)
+                VALUES (%s, %s, %s, %s, %s)
+            """
+            cursor.execute(sql, (comp_id, role_title, ctc, min_cgpa, openings))
+            conn.commit()
+            return True, "Job drive posted successfully!"
+        except Exception as e:
+            return False, f"Failed to post job: {str(e)}"
+        finally:
+            conn.close()
+    return False, "Database connection failed."
