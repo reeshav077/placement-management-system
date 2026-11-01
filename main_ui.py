@@ -217,14 +217,25 @@ elif user_role == "📊 Placement Cell Admin":
 
     with tab2:
         col1, col2 = st.columns(2)
+        
         with col1:
             st.write("#### ✅ Approve Companies & Manage Drives")
             with st.form("approve_company"):
-                new_comp_name = st.text_input("New Company Name Registration")
+                new_comp_id = st.text_input("New Company ID (e.g., 3)")
+                new_comp_name = st.text_input("New Company Name (e.g., Amazon)")
+                
                 if st.form_submit_button("Approve Company"):
-                    st.success(f"{new_comp_name} approved and added to the official recruiter list.")
+                    if new_comp_id and new_comp_name:
+                        success, msg = queries.add_company(new_comp_id, new_comp_name)
+                        if success: 
+                            st.success(msg)
+                        else: 
+                            st.error(msg)
+                    else:
+                        st.warning("Please enter both a Company ID and a Company Name.")
             
             st.divider()
+            
             st.write("#### 🛑 Control Student Placement Status")
             with st.form("manual_override"):
                 override_roll = st.text_input("Student Roll Number")

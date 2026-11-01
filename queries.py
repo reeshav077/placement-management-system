@@ -424,3 +424,19 @@ def post_job(comp_id, role_title, ctc, min_cgpa, openings):
         finally:
             conn.close()
     return False, "Database connection failed."
+
+def add_company(comp_id, comp_name):
+    """Registers a new company into the database."""
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            # Note: Ensure column names match your TiDB schema (e.g., Company_ID, Company_Name)
+            cursor.execute("INSERT INTO Company (Company_ID, Company_Name) VALUES (%s, %s)", (comp_id, comp_name))
+            conn.commit()
+            return True, f"{comp_name} has been officially approved and added to the database!"
+        except Exception as e:
+            return False, f"Error adding company: {str(e)}"
+        finally:
+            conn.close()
+    return False, "Database connection failed."
