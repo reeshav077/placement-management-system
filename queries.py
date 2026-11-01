@@ -331,3 +331,48 @@ def delete_student(roll_number):
         finally:
             conn.close()
     return False, "Database connection failed."
+
+def get_total_placed_students():
+    """Counts how many students have accepted a job offer."""
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(DISTINCT App_ID) FROM Job_Offer WHERE Acceptance_Status = 'Accepted'")
+            result = cursor.fetchone()
+            return result[0] if result and result[0] else 0
+        except Exception as e:
+            return 0
+        finally:
+            conn.close()
+    return 0
+
+def get_highest_package():
+    """Finds the maximum CTC among accepted offers."""
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT MAX(Base_Salary_LPA) FROM Job_Offer WHERE Acceptance_Status = 'Accepted'")
+            result = cursor.fetchone()
+            return float(result[0]) if result and result[0] else 0.0
+        except Exception as e:
+            return 0.0
+        finally:
+            conn.close()
+    return 0.0
+
+def get_total_companies():
+    """Counts the total number of registered recruiting companies."""
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM Company")
+            result = cursor.fetchone()
+            return result[0] if result and result[0] else 0
+        except Exception as e:
+            return 0
+        finally:
+            conn.close()
+    return 0
